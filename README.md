@@ -58,6 +58,10 @@ The server exposes the following tools:
 
 ## Example with Llama Stack
 
+
+https://github.com/user-attachments/assets/8ad34e50-cbf7-4ec8-aedd-71c42a5de0a1
+
+
 You can use this server with [Llama Stack](https://github.com/meta-llama/llama-stack) to provide document processing capabilities to your LLM applications. Make sure you have a running Llama Stack server, then configure your `INFERENCE_MODEL`
 
 ```python
