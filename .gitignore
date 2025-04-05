@@ -126,3 +126,6 @@ uv.lock
 
 # MCP
 context/
+
+# Temporary Q&A generation files
+*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*-[0-9a-f]*.jsonl

@@ -77,6 +77,37 @@ async def qna_from_document_impl(
     try:
         logger.info(f"Processing Q&A generation from source: {source} ({no_of_qnas})")
         
+        # Check for required Watson X credentials before proceeding
+        watsonx_project_id = os.environ.get("WATSONX_PROJECT_ID")
+        watsonx_api_key = os.environ.get("WATSONX_APIKEY")
+        watsonx_url = os.environ.get("WATSONX_URL")
+        
+        # Verify all required credentials are present
+        missing_credentials = []
+        if not watsonx_project_id:
+            missing_credentials.append("WATSONX_PROJECT_ID")
+        if not watsonx_api_key:
+            missing_credentials.append("WATSONX_APIKEY")
+        if not watsonx_url:
+            missing_credentials.append("WATSONX_URL")
+            
+        # If any credentials are missing, return a helpful error message
+        if missing_credentials:
+            error_message = (
+                f"Q&A generation requires IBM Watson X credentials which are missing: {', '.join(missing_credentials)}.\n\n"
+                "To use this functionality, you need to:\n"
+                "1. Create an IBM Cloud account (https://cloud.ibm.com/registration)\n"
+                "2. Set up a Watson X project (https://dataplatform.cloud.ibm.com/wx/home)\n"
+                "3. Set the following environment variables:\n"
+                "   - WATSONX_PROJECT_ID: Your Watson X project ID\n"
+                "   - WATSONX_APIKEY: Your IBM Cloud API key\n"
+                "   - WATSONX_URL: The Watson X API URL (default: https://us-south.ml.cloud.ibm.com)\n\n"
+                "Alternative: You can still use document conversion and table extraction tools "
+                "which don't require these credentials."
+            )
+            return error_message
+            
+        # Continue with Q&A generation if all credentials are present
         _uuid = uuid.uuid1()
         sample_file = f"{Path(source).name}-{_uuid}.jsonl"
 
@@ -86,9 +117,9 @@ async def qna_from_document_impl(
 
         generated_file = f"{Path(source).name}-qac-{_uuid}.jsonl"
         options = GenerateOptions(
-            project_id=os.environ.get("WATSONX_PROJECT_ID"),
-            api_key=os.environ.get("WATSONX_APIKEY"),
-            url=os.environ.get("WATSONX_URL"),
+            project_id=watsonx_project_id,
+            api_key=watsonx_api_key,
+            url=watsonx_url,
             max_qac=no_of_qnas,
             generated_file=generated_file,
         )

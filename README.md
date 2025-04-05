@@ -57,6 +57,10 @@ The server exposes the following tools:
 5. **qna_from_document**: Create a Q&A document from a URL or local path to YAML format
    - `source`: URL or local file path to the document (required)
    - `no_of_qnas`: Number of expected Q&As (optional, default: 5)
+   - **Note**: This tool requires IBM Watson X credentials to be set as environment variables:
+     - `WATSONX_PROJECT_ID`: Your Watson X project ID
+     - `WATSONX_APIKEY`: Your IBM Cloud API key
+     - `WATSONX_URL`: The Watson X API URL (default: https://us-south.ml.cloud.ibm.com)
 
 6. **get_system_info**: Get information about system configuration and acceleration status
 
@@ -131,4 +135,3 @@ _summary_and_qna('https://arxiv.org/pdf/2004.07606')
 ## Caching
 
 The server caches processed documents in `~/.cache/mcp-docling/` to improve performance for repeated requests.
-
