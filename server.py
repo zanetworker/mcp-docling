@@ -8,8 +8,10 @@ import os
 import logging
 import hashlib
 import json
+import yaml
 import gc
 import click
+import uuid
 import mcp.types as types
 from mcp.server.lowlevel import Server
 from docling.document_converter import DocumentConverter
@@ -21,6 +23,9 @@ except ImportError:
     OcrEngine = None
     EasyOcrOptions = None
     InputFormat = None
+from docling_sdg.qa.base import GenerateOptions, SampleOptions
+from docling_sdg.qa.generate import Generator
+from docling_sdg.qa.sample import PassageSampler
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -64,6 +69,45 @@ def configure_accelerator():
     except Exception as e:
         logger.warning(f"Failed to configure accelerator: {e}")
         return False
+
+async def qna_from_document_impl(
+    source: str,
+    no_of_qnas: int,
+) -> str:
+    try:
+        logger.info(f"Processing Q&A generation from source: {source} ({no_of_qnas})")
+        
+        _uuid = uuid.uuid1()
+        sample_file = f"{Path(source).name}-{_uuid}.jsonl"
+
+        passage_sampler = PassageSampler(SampleOptions(sample_file=Path(sample_file)))
+        passage_sampler.sample([source])
+        logger.info(f"Created sample file at {sample_file}")
+
+        generated_file = f"{Path(source).name}-qac-{_uuid}.jsonl"
+        options = GenerateOptions(
+            project_id=os.environ.get("WATSONX_PROJECT_ID"),
+            api_key=os.environ.get("WATSONX_APIKEY"),
+            url=os.environ.get("WATSONX_URL"),
+            max_qac=no_of_qnas,
+            generated_file=generated_file,
+        )
+        generator = Generator(generate_options=options)
+        result = generator.generate_from_sample(Path(sample_file))
+        logger.info(f"Generated Q&A at {result.output}")
+
+        with open(result.output, 'r') as file:
+            qnas = []
+            for line in file:
+                json_obj = json.loads(line.strip())
+                qnas.append({key: json_obj[key] for key in ['question', 'answer']})
+            qnas = {'question_and_answers': qnas}
+            return yaml.dump(qnas, default_flow_style=False) 
+
+    except Exception as e:
+        logger.exception(f"Error creating Q&A document: {source}")
+        return f"Error creating Q&A document: {str(e)}"
+
 
 async def convert_document_impl(
     source: str, 
@@ -278,168 +322,6 @@ async def get_system_info_impl() -> Dict[str, Any]:
     except Exception as e:
         raise ValueError(f"Error getting system info: {str(e)}")
 
-def main():
-    # Configure accelerator
-    configure_accelerator()
-    
-    app = Server("docling-processor")
-
-    @app.call_tool()
-    async def call_tool(
-        name: str, arguments: dict
-    ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-        try:
-            if name == "convert_document":
-                result = await convert_document_impl(
-                    source=arguments.get("source", ""),
-                    enable_ocr=arguments.get("enable_ocr", False),
-                    ocr_language=arguments.get("ocr_language", None)
-                )
-                return [types.TextContent(type="text", text=result)]
-            
-            elif name == "convert_document_with_images":
-                result = await convert_document_with_images_impl(
-                    source=arguments.get("source", ""),
-                    enable_ocr=arguments.get("enable_ocr", False),
-                    ocr_language=arguments.get("ocr_language", None)
-                )
-                # Return markdown text and images
-                content_items = [types.TextContent(type="text", text=result["markdown"])]
-                
-                # Add images as embedded resources
-                for img in result["images"]:
-                    content_items.append(
-                        types.ImageContent(
-                            type="image",
-                            format=img["format"],
-                            data=img["data"]
-                        )
-                    )
-                return content_items
-            
-            elif name == "extract_tables":
-                tables = await extract_tables_impl(source=arguments.get("source", ""))
-                return [types.TextContent(type="text", text="\n\n".join(tables))]
-            
-            elif name == "convert_batch":
-                result = await convert_batch_impl(
-                    sources=arguments.get("sources", []),
-                    enable_ocr=arguments.get("enable_ocr", False),
-                    ocr_language=arguments.get("ocr_language", None)
-                )
-                # Format the result as a string
-                formatted_result = "\n\n".join([f"## {source}\n\n{content}" for source, content in result.items()])
-                return [types.TextContent(type="text", text=formatted_result)]
-            
-            elif name == "get_system_info":
-                result = await get_system_info_impl()
-                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
-            
-            else:
-                raise ValueError(f"Unknown tool: {name}")
-        except Exception as e:
-            logger.exception(f"Error in tool call: {name}")
-            return [types.TextContent(type="text", text=f"Error: {str(e)}")]
-
-    @app.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return [
-            types.Tool(
-                name="convert_document",
-                description="Convert a document from a URL or local path to markdown format",
-                inputSchema={
-                    "type": "object",
-                    "required": ["source"],
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "description": "URL or local file path to the document",
-                        },
-                        "enable_ocr": {
-                            "type": "boolean",
-                            "description": "Whether to enable OCR for scanned documents",
-                            "default": False
-                        },
-                        "ocr_language": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of language codes for OCR (e.g. [\"en\", \"fr\"])",
-                        }
-                    },
-                },
-            ),
-            types.Tool(
-                name="convert_document_with_images",
-                description="Convert a document from a URL or local path to markdown format and return embedded images",
-                inputSchema={
-                    "type": "object",
-                    "required": ["source"],
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "description": "URL or local file path to the document",
-                        },
-                        "enable_ocr": {
-                            "type": "boolean",
-                            "description": "Whether to enable OCR for scanned documents",
-                            "default": False
-                        },
-                        "ocr_language": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of language codes for OCR (e.g. [\"en\", \"fr\"])",
-                        }
-                    },
-                },
-            ),
-            types.Tool(
-                name="extract_tables",
-                description="Extract tables from a document and return them as structured data",
-                inputSchema={
-                    "type": "object",
-                    "required": ["source"],
-                    "properties": {
-                        "source": {
-                            "type": "string",
-                            "description": "URL or local file path to the document",
-                        }
-                    },
-                },
-            ),
-            types.Tool(
-                name="convert_batch",
-                description="Convert multiple documents in batch mode",
-                inputSchema={
-                    "type": "object",
-                    "required": ["sources"],
-                    "properties": {
-                        "sources": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of URLs or file paths to documents",
-                        },
-                        "enable_ocr": {
-                            "type": "boolean",
-                            "description": "Whether to enable OCR for scanned documents",
-                            "default": False
-                        },
-                        "ocr_language": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of language codes for OCR (e.g. [\"en\", \"fr\"])",
-                        }
-                    },
-                },
-            ),
-            types.Tool(
-                name="get_system_info",
-                description="Get information about the system configuration and acceleration status",
-                inputSchema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-        ]
 
 @click.command()
 @click.option("--port", default=8000, help="Port to listen on for SSE")
@@ -460,7 +342,14 @@ def main(port: int, transport: str) -> int:
         name: str, arguments: dict
     ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
         try:
-            if name == "convert_document":
+            if name == "qna_from_document":
+                result = await qna_from_document_impl(
+                    source=arguments.get("source", ""),
+                    no_of_qnas=arguments.get("no_of_qnas", 5),
+                )
+                return [types.TextContent(type="text", text=result)]
+
+            elif name == "convert_document":
                 result = await convert_document_impl(
                     source=arguments.get("source", ""),
                     enable_ocr=arguments.get("enable_ocr", False),
@@ -515,6 +404,24 @@ def main(port: int, transport: str) -> int:
     @app.list_tools()
     async def list_tools() -> list[types.Tool]:
         return [
+            types.Tool(
+                name="qna_from_document",
+                description="Create a Q&A document from a URL or local path to YAML format",
+                inputSchema={
+                    "type": "object",
+                    "required": ["source"],
+                    "properties": {
+                        "source": {
+                            "type": "string",
+                            "description": "URL or local file path to the document",
+                        },
+                        "no_of_qnas": {
+                            "type": "int",
+                            "description": "Number of Q&A to generate",
+                        },
+                    },
+                },
+            ),
             types.Tool(
                 name="convert_document",
                 description="Convert a document from a URL or local path to markdown format",

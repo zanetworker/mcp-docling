@@ -54,7 +54,11 @@ The server exposes the following tools:
    - `enable_ocr`: Whether to enable OCR for scanned documents (optional, default: false)
    - `ocr_language`: List of language codes for OCR (optional)
 
-5. **get_system_info**: Get information about system configuration and acceleration status
+5. **qna_from_document**: Create a Q&A document from a URL or local path to YAML format
+   - `source`: URL or local file path to the document (required)
+   - `no_of_qnas`: Number of expected Q&As (optional, default: 5)
+
+6. **get_system_info**: Get information about system configuration and acceleration status
 
 ## Example with Llama Stack
 
@@ -87,9 +91,7 @@ client.toolgroups.register(
 # Define an agent with MCP toolgroup
 agent_config = AgentConfig(
     model=model_id,
-    instructions="""You are a helpful assistant with access to tools that can convert documents to markdown.
-When asked to convert a document, use the 'convert_document' tool.
-You can also extract tables with 'extract_tables' or get images with 'convert_document_with_images'.
+    instructions="""You are a helpful assistant with access to tools to manipulate documents.
 Always use the appropriate tool when asked to process documents.""",
     toolgroups=["mcp::docling"],
     tool_choice="auto",
@@ -102,23 +104,28 @@ agent = Agent(client, agent_config)
 # Create a session
 session_id = agent.create_session("test-session")
 
-# Define the prompt
-prompt = "Please convert the document at https://arxiv.org/pdf/2004.07606 to markdown and summarize its content."
+def _summary_and_qna(source: str):
+    # Define the prompt
+    run_turn(f"Please convert the document at {source} to markdown and summarize its content.")
+    run_turn(f"Please generate a Q&A document with 3 items for source at {source} and display it in YAML format.")
 
-# Create a turn
-response = agent.create_turn(
-    messages=[
-        {
-            "role": "user",
-            "content": prompt,
-        }
-    ],
-    session_id=session_id,
-)
+def _run_turn(prompt):
+    # Create a turn
+    response = agent.create_turn(
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        session_id=session_id,
+    )
 
-# Log the response
-for log in EventLogger().log(response):
-    log.print()
+    # Log the response
+    for log in EventLogger().log(response):
+        log.print()
+
+_summary_and_qna('https://arxiv.org/pdf/2004.07606')
 ```
 
 ## Caching
